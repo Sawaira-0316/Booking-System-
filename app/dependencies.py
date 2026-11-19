@@ -1,5 +1,4 @@
-
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -10,6 +9,17 @@ from app.auth.security import verify_token
 
 # Extract Bearer token from Authorization header
 bearer_scheme = HTTPBearer()
+
+
+# Reusable pagination dependency
+class PaginationParams:
+    def __init__(
+        self,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(10, ge=1, le=100)
+    ):
+        self.skip = skip
+        self.limit = limit
 
 
 # Get currently authenticated user

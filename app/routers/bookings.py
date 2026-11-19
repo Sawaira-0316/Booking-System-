@@ -1,13 +1,19 @@
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
+from app.schemas.booking import (
+    BookingCreate,
+    BookingUpdate,
+    BookingResponse,
+    BookingStatus
+)
+from app.schemas.pagination import Page
 from app.db.session import get_db
 from app.models.user import User
 from app.models.booking import Booking
-from app.schemas.booking import BookingCreate, BookingUpdate, BookingResponse
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, PaginationParams
 
 
 router = APIRouter(
@@ -41,20 +47,67 @@ def create_booking(
     return new_booking
 
 
-# Get bookings
-@router.get("/", response_model=list[BookingResponse])
+# Get bookings with pagination, total count and status filtering
+@router.get("/", response_model=Page[BookingResponse])
 def get_bookings(
+    pagination: PaginationParams = Depends(),
+
+    booking_status: BookingStatus | None = Query(
+        default=None,
+        alias="status"
+    ),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Base query
     query = select(Booking)
 
-    if current_user.role != "admin":
-        query = query.where(Booking.user_id == current_user.id)
+    # Count query
+    count_query = select(func.count()).select_from(Booking)
 
+    # Normal users can only see their own bookings
+    if current_user.role != "admin":
+        query = query.where(
+            Booking.user_id == current_user.id
+        )
+
+        count_query = count_query.where(
+            Booking.user_id == current_user.id
+        )
+
+    # Apply status filter if provided
+    if booking_status is not None:
+        query = query.where(
+            Booking.status == booking_status.value
+        )
+
+        count_query = count_query.where(
+            Booking.status == booking_status.value
+        )
+
+    # Calculate total matching bookings
+    total = db.execute(count_query).scalar_one()
+
+    # Apply stable ordering
+    query = query.order_by(Booking.id.desc())
+
+    # Apply pagination
+    query = query.offset(pagination.skip).limit(pagination.limit)
+
+    # Fetch current page bookings
     bookings = db.execute(query).scalars().all()
 
-    return bookings
+    # Check whether more records are available
+    has_more = pagination.skip + len(bookings) < total
+
+    return {
+        "items": bookings,
+        "total": total,
+        "skip": pagination.skip,
+        "limit": pagination.limit,
+        "has_more": has_more
+    }
 
 
 # Get one booking
@@ -86,7 +139,8 @@ def get_booking(
 
 # Update booking
 @router.put("/{booking_id}", response_model=BookingResponse)
-def update_booking(    booking_id: int,
+def update_booking(
+    booking_id: int,
     booking_data: BookingUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
