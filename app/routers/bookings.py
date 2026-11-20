@@ -1,4 +1,6 @@
 
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
@@ -47,7 +49,7 @@ def create_booking(
     return new_booking
 
 
-# Get bookings with pagination, total count and status filtering
+# Get bookings with pagination, filters, search and sorting
 @router.get("/", response_model=Page[BookingResponse])
 def get_bookings(
     pagination: PaginationParams = Depends(),
@@ -56,6 +58,19 @@ def get_bookings(
         default=None,
         alias="status"
     ),
+
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+
+    search: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=100
+    ),
+
+    # Sorting parameters
+    sort_by: str = Query(default="created_at"),
+    order: str = Query(default="desc"),
 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -76,7 +91,7 @@ def get_bookings(
             Booking.user_id == current_user.id
         )
 
-    # Apply status filter if provided
+    # Apply status filter
     if booking_status is not None:
         query = query.where(
             Booking.status == booking_status.value
@@ -86,11 +101,74 @@ def get_bookings(
             Booking.status == booking_status.value
         )
 
+    # Apply starting date filter
+    if from_date is not None:
+        query = query.where(
+            Booking.booking_date >= from_date
+        )
+
+        count_query = count_query.where(
+            Booking.booking_date >= from_date
+        )
+
+    # Apply ending date filter
+    if to_date is not None:
+        query = query.where(
+            Booking.booking_date < to_date + timedelta(days=1)
+        )
+
+        count_query = count_query.where(
+            Booking.booking_date < to_date + timedelta(days=1)
+        )
+
+    # Apply title search
+    if search is not None:
+        query = query.where(
+            Booking.title.ilike(f"%{search}%")
+        )
+
+        count_query = count_query.where(
+            Booking.title.ilike(f"%{search}%")
+        )
+
     # Calculate total matching bookings
     total = db.execute(count_query).scalar_one()
 
-    # Apply stable ordering
-    query = query.order_by(Booking.id.desc())
+    # Allowed sorting fields (whitelist)
+    allowed_sort_fields = {
+        "created_at": Booking.created_at,
+        "booking_date": Booking.booking_date,
+        "status": Booking.status
+    }
+
+    # Validate sort_by
+    if sort_by not in allowed_sort_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid sorting field"
+        )
+
+    # Validate order
+    if order not in ["asc", "desc"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order must be asc or desc"
+        )
+
+    # Get selected sorting column
+    sort_column = allowed_sort_fields[sort_by]
+
+    # Apply sorting with stable ID ordering
+    if order == "asc":
+        query = query.order_by(
+            sort_column.asc(),
+            Booking.id.asc()
+        )
+    else:
+        query = query.order_by(
+            sort_column.desc(),
+            Booking.id.desc()
+        )
 
     # Apply pagination
     query = query.offset(pagination.skip).limit(pagination.limit)
