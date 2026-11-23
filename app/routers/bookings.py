@@ -11,7 +11,7 @@ from app.schemas.booking import (
     BookingResponse,
     BookingStatus
 )
-from app.schemas.pagination import Page
+from app.schemas.pagination import Page, CursorPage
 from app.db.session import get_db
 from app.models.user import User
 from app.models.booking import Booking
@@ -22,6 +22,40 @@ router = APIRouter(
     prefix="/bookings",
     tags=["Bookings"]
 )
+
+
+# Shared filters used by both /bookings and /bookings/feed
+def apply_booking_filters(
+    query,
+    current_user: User,
+    booking_status: BookingStatus | None,
+    from_date: date | None,
+    to_date: date | None,
+    search: str | None
+):
+    # Normal users can only see their own bookings
+    if current_user.role != "admin":
+        query = query.where(Booking.user_id == current_user.id)
+
+    # Apply status filter
+    if booking_status is not None:
+        query = query.where(Booking.status == booking_status.value)
+
+    # Apply starting date filter
+    if from_date is not None:
+        query = query.where(Booking.booking_date >= from_date)
+
+    # Apply ending date filter
+    if to_date is not None:
+        query = query.where(
+            Booking.booking_date < to_date + timedelta(days=1)
+        )
+
+    # Apply title search
+    if search is not None:
+        query = query.where(Booking.title.ilike(f"%{search}%"))
+
+    return query
 
 
 # Create booking
@@ -75,61 +109,25 @@ def get_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Base query
-    query = select(Booking)
+    # Base query with all filters applied
+    query = apply_booking_filters(
+        select(Booking),
+        current_user,
+        booking_status,
+        from_date,
+        to_date,
+        search
+    )
 
-    # Count query
-    count_query = select(func.count()).select_from(Booking)
-
-    # Normal users can only see their own bookings
-    if current_user.role != "admin":
-        query = query.where(
-            Booking.user_id == current_user.id
-        )
-
-        count_query = count_query.where(
-            Booking.user_id == current_user.id
-        )
-
-    # Apply status filter
-    if booking_status is not None:
-        query = query.where(
-            Booking.status == booking_status.value
-        )
-
-        count_query = count_query.where(
-            Booking.status == booking_status.value
-        )
-
-    # Apply starting date filter
-    if from_date is not None:
-        query = query.where(
-            Booking.booking_date >= from_date
-        )
-
-        count_query = count_query.where(
-            Booking.booking_date >= from_date
-        )
-
-    # Apply ending date filter
-    if to_date is not None:
-        query = query.where(
-            Booking.booking_date < to_date + timedelta(days=1)
-        )
-
-        count_query = count_query.where(
-            Booking.booking_date < to_date + timedelta(days=1)
-        )
-
-    # Apply title search
-    if search is not None:
-        query = query.where(
-            Booking.title.ilike(f"%{search}%")
-        )
-
-        count_query = count_query.where(
-            Booking.title.ilike(f"%{search}%")
-        )
+    # Count query with the same filters
+    count_query = apply_booking_filters(
+        select(func.count()).select_from(Booking),
+        current_user,
+        booking_status,
+        from_date,
+        to_date,
+        search
+    )
 
     # Calculate total matching bookings
     total = db.execute(count_query).scalar_one()
@@ -184,6 +182,69 @@ def get_bookings(
         "total": total,
         "skip": pagination.skip,
         "limit": pagination.limit,
+        "has_more": has_more
+    }
+
+
+# Cursor feed (keyset pagination)
+# IMPORTANT: this route must stay ABOVE "/{booking_id}"
+@router.get("/feed", response_model=CursorPage[BookingResponse])
+def get_bookings_feed(
+    # Bookmark: id of the last booking the client already received
+    cursor: int | None = Query(default=None, ge=1),
+
+    limit: int = Query(default=10, ge=1, le=100),
+
+    # Same filters as /bookings
+    booking_status: BookingStatus | None = Query(
+        default=None,
+        alias="status"
+    ),
+
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+
+    search: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=100
+    ),
+
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Ownership rule and filters first
+    query = apply_booking_filters(
+        select(Booking),
+        current_user,
+        booking_status,
+        from_date,
+        to_date,
+        search
+    )
+
+    # Only rows after the bookmark (newest first means smaller ids)
+    if cursor is not None:
+        query = query.where(Booking.id < cursor)
+
+    # Newest first; ask for one extra row to know if more exist
+    query = query.order_by(Booking.id.desc()).limit(limit + 1)
+
+    rows = db.execute(query).scalars().all()
+
+    # If the extra row came back, another page exists
+    has_more = len(rows) > limit
+
+    # Remove the extra row before returning
+    items = rows[:limit]
+
+    # Bookmark for the next page (None on the last page)
+    next_cursor = items[-1].id if has_more else None
+
+    return {
+        "items": items,
+        "limit": limit,
+        "next_cursor": next_cursor,
         "has_more": has_more
     }
 
