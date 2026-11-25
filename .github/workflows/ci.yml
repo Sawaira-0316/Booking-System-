@@ -3,14 +3,22 @@ name: CI
 on: push
 
 jobs:
-  hello:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - name: Say hello
-        run: echo "Hello from the robot!"
-
       - name: Download my code
         uses: actions/checkout@v7
 
-      - name: Look at the files
-        run: ls -a
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install my libraries
+        run: pip install -r requirements.txt
+
+      - name: Can the app start?
+        env:
+          DATABASE_URL: postgresql+psycopg2://demo:demo@localhost:5432/demo
+          SECRET_KEY: ci-only-secret
+        run: python -c "import app.main; print('The app can start!')"
