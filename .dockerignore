@@ -1,0 +1,20 @@
+# Files Docker must never copy into the package.
+
+# Secrets
+.env
+.env.*
+
+# Your own computer's files
+.venv
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+
+# Not needed to run the app
+tests
+scripts
+README.md
+Dockerfile
+.dockerignore

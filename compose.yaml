@@ -1,0 +1,21 @@
+# Docker Compose: "start these containers together and connect them".
+services:
+
+  # Container 1: the database
+  db:
+    image: postgres:16            # a ready-made package, no Dockerfile needed
+    environment:                  # settings for Postgres itself
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: booking  # fake password, only for your own computer
+      POSTGRES_DB: booking
+
+  # Container 2: your API
+  api:
+    build: .                      # make the package from our Dockerfile
+    ports:
+      - "8000:8000"               # your computer : inside the container
+    environment:                  # settings given from outside
+      DATABASE_URL: postgresql+psycopg2://booking:booking@db:5432/booking
+      SECRET_KEY: local-dev-only-secret
+    depends_on:
+      - db                        # start the database first

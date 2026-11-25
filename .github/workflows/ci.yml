@@ -1,0 +1,16 @@
+name: CI
+
+on: push
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say hello
+        run: echo "Hello from the robot!"
+
+      - name: Download my code
+        uses: actions/checkout@v7
+
+      - name: Look at the files
+        run: ls -a
