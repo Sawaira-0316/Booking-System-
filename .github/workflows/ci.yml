@@ -5,6 +5,28 @@ on: push
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # A real Postgres database, started next to the robot (fake password, throwaway).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: booking
+          POSTGRES_PASSWORD: booking
+          POSTGRES_DB: booking_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U booking -d booking_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # Settings for every step below (fake values, only for the robot).
+    env:
+      DATABASE_URL: postgresql+psycopg2://booking:booking@localhost:5432/booking_test
+      SECRET_KEY: ci-only-secret
+
     steps:
       - name: Download my code
         uses: actions/checkout@v7
@@ -23,7 +45,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Can the app start?
-        env:
-          DATABASE_URL: postgresql+psycopg2://demo:demo@localhost:5432/demo
-          SECRET_KEY: ci-only-secret
         run: python -c "import app.main; print('The app can start!')"
+
+      - name: Create the database tables
+        run: python -m app.db.init_db
+
+      - name: Run the tests
+        run: python -m pytest -ra
