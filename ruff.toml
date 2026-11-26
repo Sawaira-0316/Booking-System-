@@ -1,0 +1,9 @@
+# Settings for the code checker (ruff).
+# We only turn on rules that find real mistakes:
+#   E9  = code that Python cannot even read (syntax errors)
+#   F63 = wrong comparisons
+#   F7  = statements in the wrong place
+#   F82 = a name that does not exist (typos)
+# Style rules are off on purpose, so your existing code passes.
+[lint]
+select = ["E9", "F63", "F7", "F82"]
