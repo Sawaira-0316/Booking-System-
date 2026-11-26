@@ -52,3 +52,33 @@ jobs:
 
       - name: Run the tests
         run: python -m pytest -ra
+
+  # A second job. It runs at the same time as "check", on its own new computer.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download my code
+        uses: actions/checkout@v7
+
+      - name: Build the Docker image
+        run: docker build -t booking-api .
+
+      - name: Start the container
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e DATABASE_URL=postgresql+psycopg2://demo:demo@db:5432/demo \
+            -e SECRET_KEY=ci-only-secret \
+            booking-api
+
+      - name: Ask the container "are you running?"
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/; then
+              echo
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "The container did not answer in 30 seconds"
+          docker logs api
+          exit 1
