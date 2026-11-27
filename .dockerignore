@@ -13,6 +13,7 @@
 .ruff_cache
 
 # Not needed to run the app
+booking_frontend
 tests
 scripts
 README.md
